@@ -1,0 +1,51 @@
+# .bureau configuration examples
+
+## Example office config (.bureau/config.yaml inside a project)
+This file lives in each project's `.bureau/` directory. The global registry
+(`~/.bureau/confix.yaml`) tracks all offices and which one is active.
+
+```yaml
+# /path/to/project/.bureau/config.yaml
+id: my-project
+name: "My Project"
+
+# Where the actual project files live (can be outside the office)
+worksite: /path/to/real/project
+
+# Ticket/plantion directory layout relative to this file's location
+layout:
+  interviews_dir: .bureau/tickets
+  plans_dir:    .bureau/plans
+  executions_dir: .bureau/executions
+
+# LLM provider overrides for specific modes.
+# Starts as global (Decision Q22/A), planning per-office override (Q22/C).
+providers:
+  architect:
+    name: "openai"
+    model: "claude-3-5-sonnet-20241022"
+    base_url: "https://api.openai.com/v1"
+    # api_key_source handled by environment
+```
+
+## Global config (`~/.bureau/config.yaml`)
+This tracks all known offices for the sidebar + command palette to render.
+
+```yaml
+offices:
+  - id: my-project
+    name: "My Project"
+    worksite: /path/to/real/project
+    status: active
+
+default_provider:
+  name: "openai"
+  base_url: "https://api.openai.com/v1"
+  model: "gpt-4o"
+  api_key_source:
+    type: env
+    variable: "OPENAI_API_KEY"
+
+tui_layout: sidebar   # or "tab" — user preference
+```
+

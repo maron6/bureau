@@ -1,0 +1,26 @@
+[package]
+name = "bureau"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# TUI
+ratatui = "0.29"
+crossterm = "0.28"
+
+# Config & serialization
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"
+toml = "0.8"
+
+# HTTP LLM provider
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "streaming"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
+
+# Utilities
+anyhow = "1"
+thiserror = "2"
+chrono = { version = "0.4", features = ["serde"] }
+walkdir = "2"   # office traversal for archivist
+glob = "0.3"    # prefix pattern matching in sandbox allowlist
+rand = "0.8"    # ID generation and random scope expansion selection
