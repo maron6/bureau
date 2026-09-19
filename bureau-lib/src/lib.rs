@@ -19,6 +19,7 @@
 pub mod config;
 pub mod ticket;
 pub mod sandbox;
+pub mod worklog;
 pub mod agent;
 pub mod office;
 pub mod provider;
@@ -45,6 +46,7 @@ pub mod piping;
 pub use config::{GlobalConfig, OfficeConfig, OfficeEntry, ProviderConfig};
 pub use ticket::{Ticket, TicketType, Phase};
 pub use sandbox::Sandbox;
+pub use worklog::{WorkLogEvent, WorkLogEntry, WorkLogBindingError};
 pub use skills::{SkillsLoader, Skill};
 pub use agent::AgentLoop;
 pub use office::Office;
