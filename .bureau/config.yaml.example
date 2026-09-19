@@ -47,5 +47,36 @@ default_provider:
     variable: "OPENAI_API_KEY"
 
 tui_layout: sidebar   # or "tab" — user preference
+
+## Skills loading order (D18)
+# Global skills are loaded first, then office-specific skills.
+# Multiple SKILL.md files in the same directory are loaded alphabetically.
+skills:
+  global_paths:
+    - ~/.bureau/skills/bureaucrat/SKILL.md
+    - ~/.bureau/skills/worker/SKILL.md
+  office_paths:
+    - .bureau/skills/
+
+## Run configuration defaults (D20)
+defaults:
+  mode: execution          # default mode when entering office dashboard
+  provider: openai-gpt4   # preferred LLM provider
+
+## Inspector permissions config (D21)
+inspector_scope:
+  auto_grant_to_user: true   # inspector scope expansion bypasses architect gatekeeper
+  audit_log_path: office/permissions.log
+
+## Dashboard preferences (D22)
+tui_dashboard:
+  show_archived_tickets: false   # default state of archive filter toggle
+  worker_progress_format: "progressbar"  # or "simple"
+  dependency_render_style: "unicode"  # or "ascii", or "none"
+
+## Secret unlock settings (D16)
+secret_unlock:
+  require_permit_scope: true     # only allow unlocks within permit's scope
+  audit_on_request: true         # log each secret request to permissions.log
 ```
 

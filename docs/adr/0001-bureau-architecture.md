@@ -186,3 +186,198 @@ These rules are application-level, not per-permit. No agent—research or worker
 Workers can request access to secrets via a special `@secret_unlock: [path]` tool call annotation scoped to their permit. The user must **explicitly** approve this per-permit, which updates that specific permit's allow-list (not the global config). No secret unlock in any agent is possible without explicit user approval tied to a specific bureaucratic work item.
 
 Consequence: Secrets are readable only by workers who have been explicitly authorized by the user within the context of an approved permit. Research cannot read secrets, and it doesn't need to—its role is exploration and summarization, not configuration access.
+
+---
+
+## Addendum: Grilling Session Q27–Q56 (Nix Integration, Run Configs, Skills System, Dashboard UX, Inspection Permissions)
+
+### D17 - Nix Flake Defaults on Office Creation
+
+**Q27/A**: When an office is created in a project that already has `flake.nix`, Bureau detects it and auto-configures to use the project's dev shell as its working directory. It queries `nix flake show` (via `nix flake metadata`) to extract available outputs.
+
+When a project does *not* have `flake.nix`, Bureau offers an optional bootstrap wizard that:
+
+1. Detects the primary language from the interview ticket's metadata (`language: rust|typescript|python|...`)
+2. Offers standard dev-shell templates per detected language (e.g., `nixpkgs.rustc + cargo`, `nixpkgs.nodejs`, `nixpkgs.python39`)
+3. **Does not** auto-generate outputs in the project's `flake.nix` — that would be a write to an arbitrary repo and outside Bureau's scope.
+4. Instead, it offers to create `.bureau/flake.nix` as an *office-isolated* flake overlay if the user opts in.
+
+The generated `devFlakes.nix` lives under `.bureau/` and contains dev-shell derivations for each language the office supports. This file is never committed — it is local to the developer's machine just like their existing `flake.nix`.
+
+**Q27/C consequence**: The interview phase must capture `language: [lang]` metadata as a structured field, not just free text. This drives default tooling and dev-shell selection during office creation.
+
+**Consequence**: Bureau respects the principle of "never write to arbitrary project files." Dev-shell setup is either detected (if flake exists) or confined to `.bureau/`. The user makes all git-impacting decisions explicitly.
+
+### D18 - Skills System: Per-Mode SKILL.md Injection
+
+**Q27/D**: Bureau supports a **skills** system where each mode (bureaucrat, architect, worker, inspector, archivist) can have one or more `SKILL.md` files that inject domain-specific behavior into the agent's system prompt at startup.
+
+**Loading hierarchy** (global → office, user-defined order):
+1. `~/.bureau/skills/{mode}/SKILL.md` — global skills, shared across all offices
+2. `.bureau/skills/{mode}/SKILL.md` — office-specific skills (project-local)
+3. Multiple skills per directory are loaded *alphabetically by filename* for predictable precedence
+
+**Injection behavior** (`Q50/B`):
+- Skills files are injected as **read-only context** into the agent's system prompt at loop start, alongside the permit + ticket
+- The injection order is: `[global skills → office skills] then [permit scope] then [ticket content]`
+- This means global skills provide base behavior, office skills override/refine it per-project, and the permit/ticket provide the active work context
+- Skills can declare `required_tools: [...]` or `disabled_tools: [...]` — these are **enforced** by the sandbox during agent execution, not just advisory
+
+**File format** (`Q50/C`):
+```yaml
+# SKILL.md frontmatter (parsed as YAML)
+nmame: "code-review"
+description: "Perform structured code review following X standards"
+scope_read: ["src/", ".bureau/plans/*"]
+disabled_tools: []
+```
+
+Skills can also declare **pre-injection hooks** — shell commands that run before any agent loop starts in this mode.
+
+**Consequence**: Bureau becomes extensible without code changes. Users with domain-specific knowledge (e.g., company coding standards, project conventions) can write SKILL.md files and deploy them globally or per-office. Skills compose — multiple skills stack additively into the prompt context.
+
+### D19 - Single-Permit Execution Rules
+
+**Q34**: At most **one permit** may be in the `execution` phase per office at any time. This is a hard constraint enforced by the TUI and the office manager:
+
+- An execution-mode agent loop cannot start if another permit's execution agent is already running
+- The inspector barrier between planning and execution prevents double-starting
+- If an execution agent crashes mid-run, its permit status reverts to `execution` with `crashed: true`; the user must explicitly acknowledge (UI button) before restarting
+
+**Q35**: **Interviewing new permits is allowed concurrently** with an active execution. The bureaucrat can conduct multiple interviews in parallel — only *execution* is serialized.
+
+**Q36**: Interview state is tracked independently per interview ticket and persists across Bureau restarts. Each interview gets `draft` → `in_review` → `approved`/`needs_more_info`. An approved interview becomes a permit that can enter the execution queue.
+
+**Q37-C consequence**: The user dashboard must show at-a-glance which permits are in which states, especially highlighting the single-execution constraint. Active execution gets a prominent badge; upcoming permits get a queue indicator.
+
+**Consequence**: Execution is intentionally serial within an office to prevent sandbox collisions and scope conflicts between workers. Interview parallelism allows rapid requirement gathering for future work without blocking current development.
+
+### D20 - Run Configurations: Office-Specific Launch Settings
+
+**Q40/A**: Each office can define **run configurations** independently of permits and tickets — this is a user-managed construct, not something the archivist produces.
+
+Run configs are stored in `.bureau/run_configs.yaml` (similar to VS Code's `launch.json`):
+```yaml
+# .bureau/run_configs.yaml
+defaults:
+  mode: execution          # default mode when opening office
+  provider: openai-gpt4   # preferred LLM provider
+run_configs:
+  - name: "full pipeline"
+    mode: execution
+    permit_filter: null    # all permits
+    skip_inspection: false
+    description: "Run full interview→plan→execution→inspection cycle"
+  - name: "inspect only"
+    mode: inspection
+    permit_filter: "056"  # specific permit ID
+    description: "Review latest execution for quality gate"
+```
+
+**Properties per configuration** (`Q40/D/E/F`):
+- `name`: Display name (used in command palette and dashboard)
+- `mode`: Target mode to launch (execution, inspection, interview, archival)
+- `permit_filter`: Which permits this config applies to (null = all, string = specific ID)
+- `override_scope`: Optional per-permit scope overrides for testing or audit purposes
+- `skip_inspection`: UI toggle shown in command palette when launching; when checked, skips the inspection barrier immediately after execution
+- `description`: Human-readable explanation shown in command palette hover
+
+The **archivist** can *propose* run configurations tied to specific permits (Q40/F), but the archivist does **not** auto-create or auto-commit them. This is a user-decision workflow — archivist output is advisory only.
+
+Run configs are managed via:
+- Command palette: `> bureau: new run config`
+- TUI panel within office dashboard view
+- Direct file edit (`.bureau/run_configs.yaml`)
+
+**Consequence**: Run configs give users a way to create reusable "workflows" without manually configuring permits and modes each time. They are decoupled from the permit system — no lifecycle tie, just convenience shortcuts.
+
+### D21 - Permission Model: Ticket-Bound Read Scope
+
+**Q53/A**: A worker's read scope is **bound to the ticket in which it operates**, not only to its permit. If a worker holds execution ticket `008-exec` and the inspection passes, that worker gets read scope extending to:
+- All tickets that `008-exec` references (direct links like `#003-plan`)
+- Permits referenced by `008-exec`
+
+This creates a **ticket-bound permissions model** where each agent's read capability is derived from the specific ticket it is working on, not just the broad permit that initialized the office.
+
+**Q54/A**: Inspector scope follows the same pattern: inspector gets read access to all tickets within the inspection permit's lifecycle (plan + execution tickets). Scope expansion requests for inspectors bypass the architect gatekeeper — they go **directly to user approval** via the TUI permission panel.
+
+Permission toggle behavior in the TUI:
+- When a worker requests scope expansion (`@scope_request`), it appears as a named item in the dashboard's right sidebar under "Pending Permissions"
+- User can: **Approve** (adds to permit allow-list), **Deny** (rejects, returns request to worker with reason note), or **Delegate** (forwards to bureaucrat/architect per hierarchy)
+- Approved permissions are logged in `office/permissions.log` as a JSONL audit trail
+
+**Consequence**: Agents gain read access dynamically based on their ticket's relationships. This means an agent working on execution ticket `008-exec` can read whatever that ticket references (plans, permits), but nothing else — including files the permit technically authorized, unless explicitly linked from its ticket.
+
+### D22 - Dashboard UX: Permit Cards & Ticket Status Grid
+
+**Q49/B**: The dashboard view uses a **card-based layout** for the active permit at the top, followed by a **ticket status grid** below:
+```
+┌───────────── ACTIVE PERMITS ────────────────┐
+│ [permit 045: Implement authentication]       │
+│   State: execution     Workers: 3 active      │
+│   Plan: 042-plan ✓    Inspection: waiting     │
+│   Escalations: 2     Permissions: 1 pending   │
+│                                                │
+├───────────── TICKET STATUS GRID ─────────────┤
+│ Ticket  Type       Status      Workers        │
+│ 043-plan plan        approved    -            │
+│ 044-exec execution in_progress  ●●○           │
+│ 045-exec execution pending     ○             │
+│ 046-inspection inspection waiting   -         │
+│                                                │
+├───────────── WORKERS ─────────────────────────┤
+│ W3: writing src/auth.rs ... (47/120)         │
+│ W4: reading config.md ... (done)              │
+│ W5: inspecting plan-042 ✓                     │
+├───────────── PENDING PERMISSIONS ────────────┤
+│ [!] scope_expand@044-exec → src/certs/       │
+│     → Deny / Approve / Delegate               │
+└────────────────────────────────────────────────┘
+```
+
+**Active permit cards** at the top:
+- Permit name + number from 045-interview (or whichever phase title is chosen)
+- Current status badge (`execution`, `planning`, etc.)
+- Worker count indicator (number of active worker loops)
+- Plan status (✓ approved, ○ pending, ! needs updates)
+- Pending escalation/permission count
+- **Click to expand** → shows raw YAML permit content with `$EDITOR` toggle option
+
+**Ticket status grid:**
+- Columns: ticket number (prefix), type label (plan/execution/etc.), status badge, worker count
+- Click any ticket row to open it in a new tab/view
+- Dependency tracking via `depends_on: [042-plan]` in the YAML — displayed as thin dependency lines in grid rendering if ratatui supports them
+- Archived tickets are **hidden by default** but accessible via toggle in grid header (`Show archived: ON/OFF`)
+
+**Worker progress bars:**
+- Rendered as `[=======○...] (47/120)` using bar characters from tick module or custom rendering per ratatui's unicode support
+- Shows file-modifying operations when the agent is writing files
+- Progress is approximate — based on estimated tokens per phase, not actual token count
+
+**Quick actions in dashboard:**
+- `p` — Pause/resume current execution (or permit-wide pause)
+- `r` — Restart crashed worker
+- `a` — Approve all pending permissions at once
+- `/` — Start new interview (bureaucrat)
+- Esc/`q` — Return to office list
+
+**Dependency tracking across tickets** (`Q40/B`):
+- When a permit references tickets by ID, Bureau displays them as connected nodes in the dependency graph
+- A simple ASCII line graph or ratatui's unicode box-drawing characters show:
+  `interview → plan → execution → inspection → archival`
+- Circular dependencies (ticket A depends on B, B depends on A) are flagged.
+
+**Consequence**: Dashboard gives a complete operational overview: what work is happening, which permits exist, how the pipeline flows, pending decisions needing user action. Agent progress visibility replaces terminal-only workflows with visual feedback.
+
+### D23 - Pipe-to-Office UX Enhancement
+
+**Q51/A**: When piping results to bureau (e.g., from an external editor or CLI), the system must collect:
+- **Bureau name**: Which office to pipe to (or create)
+- **Intent description**: What the user wants in plain language (required by D3 — bureaucrat interviews until permit is complete)
+- **Optional permit ID**: Attach to existing permit vs. create new
+- **Mode**: Which mode to launch (bureaucrat, worker, inspection, archival)
+- **Target file path** in target office where the piped content lands (`$EDITOR` or write command)`
+
+Example: `echo "review auth implementation" | bureau pipe --intent="Review authentication for security issues" --mode=inspection`
+
+**Consequence**: Pipes become a way to invoke Bureau's workflow from external tools (CLI, editors, CI pipelines) without opening the TUI first.
