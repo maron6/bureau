@@ -2,7 +2,7 @@
 
 **Created**: 2025-01  
 **Last Updated**: 2025-09-18  
-**Git Commit**: [see commit hash when pushed]  
+**Working Commit**: `9f72071` (P5–P9 complete: agent loop integration, TUI helpers, CLI + office scaffold, tests)  
 **ADR Reference**: `docs/adr/0001-bureau-architecture.md` (D1-D23 decisions)  
 **Purpose**: Handoff for continuing implementation. All grilling decisions recorded in ADRs; this tracks what is built vs pending.
 
@@ -138,16 +138,86 @@ Unit and integration tests:
 
 ## Pending Work (Future Sprints)
 
-### P5–P9 — Completed ✅
-All items from this iteration are implemented (see "Completed" section above).
+### P0–P9 Complete ✅
+All infrastructure, skills system, run configs, dashboard types, inspector gate, CLI subcommands, office scaffolding, and tests are implemented.
 
-### Remaining Priorities
-1. **Integration with actual LLM provider** — implement `ChatProvider::chat()` with reqwest
-2. **Agent loop orchestrator** — wire checkpoint/JSONL history into a real turn loop
-3. **TUI ratatui rendering** — connect dashboard helpers to actual widgets in `tui/src/app.rs`
-4. **Pipe-to-office flow** — implement research→office piping with intent-setting gate (Q27/Q32)
-5. **Archivist validation** — complete D9 cross-reference audit + run config proposals
-6. **Provider trait completion** — full ChatProvider impl for OpenAI/other providers
+---
+
+### Sprint 1 — LLM Provider Integration + Agent Loop
+**Goal**: Wire up an actual provider so the agent can call an LLM.
+
+| Task | Module(s) | Details |
+|---|---|---|
+| **Provider: OpenAI impl** | `provider.rs` → `providers/openai.rs` | Fill in ChatProvider trait; POST to `$base_url/chat/completions`, stream responses, handle auth via ApiKeySource variant |
+| **Open other providers** | `providers/{ollama, anthropic}.rs` | Ollama (localhost:11434) first, then Claude API when needed |
+| **AgentLoop::run_turn()** | `agent.rs` | Pull checkpoint history tail + assemble_system_prompt(); call provider; write JSONL event; update checkpoint |
+| **ModeBarrier fan-out/fan-in** | `agent.rs` | Spawn worker tasks per ticket in a phase; wait for all to complete before moving next mode; trigger gate barriers |
+| **Checkpoint recovery** | `checkpoint::load()` + `TicketContextSnapshot` | On resume, feed last N history events as system prompt continuation |
+
+---
+
+### Sprint 2 — TUI Widget Rendering
+**Goal**: Connect the dashboard helpers (P6) to actual ratatui widgets.
+
+| Task | Module(s) | Details |
+|---|---|---|
+| **Sidebar: PermitCard rendering** | `tui/src/app.rs` + `bureau_lib::dashboard` | Expandable cards with status_badge(); toggle $EDITOR on press; click-to-highlight active ticket |
+| **Main area: TicketGrid as Table widget** | `tui/src/app.rs` | Use ticket_grid_as_table() to feed ratatui::widgets::Table; highlight selected row; filter archived toggle |
+| **Bottom panel: WorkerBar → Gauge** | `tui/src/app.rs` + `bureau_lib::dashboard` | Map progress percentages to ratatui::widgets::Gauge/BarGauge per active ticket |
+| **Action bar: PermissionPanel items** | `tui/src/app.rs` + pending_action_bar() | Render [A]pprove/[D]eny keybindings; call InspectorGate on confirm; show resolved toast |
+| **TUI config loading** | `app.rs` → GlobalConfig | Load offices from ~/.bureau/config.yaml at startup; populate sidebar list |
+
+---
+
+### Sprint 3 — Pipe-to-Office + Research Persistence
+**Goal**: Research session save/load and pipe workflow.
+
+| Task | Module(s) | Details |
+|---|---|---|
+| **ResearchSession::save_session()** | `research/mod.rs` | Write metadata YAML + per-finding markdown files to ~/.bureau/research/sessions/{id}/ |
+| **Housekeeping TTL cleanup** | `research/mod.rs` | Scan sessions dir; delete non-important sessions older than research_session_ttl_days |
+| **Pipe UX state machine** | `piping/mod.rs` → tui/src/pipeline.rs | Show pipeline choice dialog (existing office vs new); force focus_intent gate per Q32/B |
+| **Pipe target resolver** | `config.rs` → OfficeEntry lookup | Validate office_id exists in GlobalConfig; resolve worksite path for ExistingOffice pipe |
+
+---
+
+### Sprint 4 — Archivist Validation + Run Proposals
+**Goal**: Complete the D9 archivist pass.
+
+| Task | Module(s) | Details |
+|---|---|---|
+| **Cross-reference audit** | `agent.rs` or new `archivist/mod.rs` | Walk all tickets in an office; verify parent_plan references exist; flag orphaned tickets |
+| **ArchivistProposal generation** | `run_config/mod.rs` + propose_run_configs() | Build summary artifact from completed tickets; propose reusable run configs based on patterns found |
+| **Archivist state machine** | `ticket.rs::Status/Transition` | Transition: ArchivingStarted → AuditComplete → GeneratingSummary → Complete per D3 |
+
+---
+
+### Sprint 5 — Cleanup + Polish
+**Goal**: Strengthen quality of the existing codebase.
+
+| Task | Module(s) | Details |
+|---|---|---|
+| **Ticket uuid crate** | `ticket.rs` | Replace rand::random::<u32>() with uuid::Uuid::new_v4() (unblocks provider dep resolution) |
+| **Provider trait implementation** | `provider.rs` | Flesh out ChatMessage, ChatResponse types for multi-provider dispatch |
+| **Integration test suite** | `bureau-lib/tests/` | Add pipe→office flow test; sandbox enforcement scenarios across modes |
+| **Error type unification** | All modules | Replace generic anyhow where context-specific Error types add value |
+
+---
+
+### Known Issues / Blockers (updated)
+
+| # | Issue | Impact | Resolution Path |
+|---|---|---|---|
+| 1 | **No local toolchain**: cargo is not installed locally. P2: requires Nix flake evaluation for dev shell. | Cannot compile or run tests | Set up nix develop; add flake.nak to workspace
+| 2 | **Provider trait incomplete**: provider.rs has ChatProvider scaffolding — full reqwest impl TBD.
+ | S1 depends on this
+| **Research saving pending**: `save_session()` in research/mod.rs has TODO stub print statements rather than actual fs writes.
+ | P3 blocks pipe flow
+| 4 | **Ticket numbering**: uses `rand::random::<u32>()` instead of uuid crate (future improvement).
+ | Future; low urgency |
+| 5 | **Dead import**: `AtomicUsize` unused in tui/src/app.rs. |
+ Cosmetic/code quality fix. Remove import.
+
 
 ---
 
