@@ -33,6 +33,20 @@ pub enum OfficeStatus {
     // These map to the lifecycle phases. The sidebar shows these as status badges.
 }
 
+impl OfficeStatus {
+    /// Display name for this status (used in work-log auto-append).
+    pub fn display(&self) -> &'static str {
+        match self {
+            OfficeStatus::Idle => "idle",
+            OfficeStatus::Interviewing => "interviewing",
+            OfficeStatus::Planning => "planning",
+            OfficeStatus::Executing => "executing",
+            OfficeStatus::Inspecting => "inspecting",
+            OfficeStatus::Archiving => "archiving",
+        }
+    }
+}
+
 impl Office {
     /// Create a new office from an existing directory.
     pub fn new(id: impl Into<String>, name: impl Into<String>, home: PathBuf) -> Result<Self> {
@@ -91,5 +105,42 @@ impl Office {
     pub fn worksite_path(&self) -> &std::path::Path {
         &self.worksite
     }
-}
 
+    // ----------------------------------------------------------------------
+    // P3: Auto-append gate integration
+    // ----------------------------------------------------------------------
+
+    /// Transition this office to a new status, auto-logging the work-log entry.
+    /// 
+    /// This is the phase-transition gate that ensures every mode change
+    /// produces an auto-appended work-log system entry for traceability.
+    /// The append is best-effort (non-fatal) so it never blocks valid
+    /// transitions even if the work-log file cannot be written.
+    pub fn transition_ticket(
+        &mut self,
+        old_status: OfficeStatus,
+        new_status: OfficeStatus,
+        ticket_num: u64,
+    ) -> Result<()> {
+        // Record the phase transition in the work-log before updating state.
+        let msg = format!(
+            "status change: {} → {}",
+            old_status.display(),
+            new_status.display()
+        );
+        
+        // Best-effort append — log but don't block the transition.
+        let wl_path = self.executions_dir()
+            .join(format!("{:03}-worklog.md", ticket_num));
+        let _ = crate::worklog::append_system_event(
+            &wl_path,
+            new_status.display().to_string(),
+            msg,
+        );
+        
+        // Update office status after logging.
+        self.status = new_status;
+
+        Ok(())
+    }
+}

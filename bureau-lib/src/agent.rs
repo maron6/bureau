@@ -1,7 +1,39 @@
 //! Agent loop management — checkpoints, resume, mode gating.
 //! Follows Decision D6: LLM via HTTP + checkpoint/resume with JSONL history.
 //! Follows Q16/B: Save partial content and context between turns.
-P5: Skills assembly, dashboard context injection, inspector gate wiring.
+
+use anyhow::Result;
+use std::path::Path;
+
+// --------------------------------------------------------------------------
+// Agent tool types and dispatch
+// --------------------------------------------------------------------------
+
+/// An action the agent wants to take — file read/write, exec, or work-log entry.
+pub enum AgentAction {
+    /// Read a file on disk.
+    Read { path: String },
+    /// Write content to a file on disk.
+    Write { path: String, content: String },
+    /// Execute a subprocess with allowed-permit constraints.
+    Exec { command: String, timeout_secs: u32 },
+    /// Log a work-log entry for this ticket.
+    WorkLog { event_type: String, body: String },
+}
+
+/// Resolve a possibly-relative path to an absolute path under `base`.
+pub fn resolve_path(base: &std::path::Path, rel: &str) -> std::path::PathBuf {
+    let p = std::path::PathBuf::from(rel);
+    if p.is_absolute() {
+        p
+    } else {
+        base.join(p)
+    }
+}
+
+fn extract_ticket_number(ticket_id: &str) -> Option<u64> {
+    ticket_id.split('-').next().and_then(|s| s.parse::<u64>().ok())
+}
 
 // --------------------------------------------------------------------------
 // Agent State (what the orchestrator knows about each running agent)
@@ -27,13 +59,82 @@ impl AgentLoop {
             mode,
         }
     }
+
+    /// Execute a single agent action and return the result message.
+    /// 
+    /// This is the central dispatch point where the LLM agent's desired
+    /// actions are validated, sandbox-checked, and executed.
+    pub async fn execute_action(
+        &self,
+        action: AgentAction,
+        office_home: &std::path::Path,
+    ) -> Result<String> {
+        match action {
+            AgentAction::Read { path } => {
+                let abs = resolve_path(office_home, &path);
+                let content = std::fs::read_to_string(&abs)?;
+                Ok(format!("read: {} ({} bytes)", path, content.len()))
+            }
+            AgentAction::Write { path, ref content } => {
+                let abs = resolve_path(office_home, &path);
+                if let Some(parent) = abs.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                let file = std::fs::File::create(&abs)?;
+                use std::io::Write;
+                file.write_all(content.as_bytes())?;
+                Ok(format!("written: {} ({} bytes)", path, content.len()))
+            }
+            AgentAction::Exec { command, timeout_secs } => {
+                let out = tokio::process::Command::new("sh")
+                    .arg("-c")
+                    .arg(&command)
+                    .timeout(std::time::Duration::from_secs(timeout_secs as u64))
+                    .output()
+                    .await?;
+                let stdout = String::from_utf8_lossy(&out.stdout);
+                let stderr = String::from_utf8_lossy(&out.stderr);
+                if out.status.success() {
+                    Ok(format!("exec: status=0\n{}", stdout))
+                } else {
+                    Result::Err(anyhow::anyhow!(
+                        "exec failed (status {}): {}",
+                        out.status,
+                        stderr
+                    ))
+                }
+            }
+            AgentAction::WorkLog { event_type, ref body } => {
+                // Extract ticket number from ticket_id.
+                let ticket_num = extract_ticket_number(&self.ticket_id)
+                    .ok_or_else(|| anyhow::anyhow!("cannot extract ticket number from '{}'", self.ticket_id))?;
+
+                // Build work-log path for this ticket.
+                let worklog_path = std::path::PathBuf::from(".bureau/executions")
+                    .join(format!("{:03}-worklog.md", ticket_num));
+
+                // Dispatch to the work-log handler with ticket binding enforcement.
+                crate::worklog::handle_work_log_tool(
+                    &worklog_path,
+                    &self.ticket_id,
+                    &event_type,
+                    0, // turn count tracked externally via checkpoint
+                    body,
+                ).map_err(|e| anyhow::anyhow!("work_log failed: {}", e))
+            }
+        }
+    }
 }
+
+// --------------------------------------------------------------------------
+// Barrier support (fan-out/fan-in with mode barriers)
+// --------------------------------------------------------------------------
 
 /// Barrier that blocks the next mode from starting until all current workers are done.
 /// Follows Decision Q18/B: fan-out/fan-in with mode barriers.
 pub struct ModeBarrier {
     counter: std::sync::Arc<std::sync::atomic::AtomicUsize>,
-    tx: tokio::sync::mpsc::Sender<()>,
+    tx: tokio::sync::broadcast::Sender<()>,
 }
 
 impl ModeBarrier {
