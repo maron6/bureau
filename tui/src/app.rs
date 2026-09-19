@@ -1,6 +1,5 @@
 /// Application state — tracks current office, active mode, command palette.
 /// Follows Decision Q15/A+C: sidebar + command palette for multi-office navigation.
-
 use std::sync::atomic::{AtomicUsize};  // for concurrency tracking in fan-out/fan-in model (Decision Q18/B)
 
 use crate::{ticket, config, office};
@@ -30,13 +29,34 @@ impl App {
     
     /// Switch the active office by index. Called from the command palette (Ctrl+P).
     pub fn switch_office(&mut self, index: usize) {
-        if let Some(office_id) = self.offices.get(index).map(|o| &o.id) {.clone() {
+        if let Some(office_id) = self.offices.get(index).map(|o| o.id.clone()) {
             println!("Switching to office '{}'...", office_id);
             // In the full implementation: load office config, update TUI state.
             // This is scaffolding only.
         }
     }
     
+    /// Builder-style constructor for use in CLI where global config may not be available.
+    pub fn builder() -> AppBuilder {
+        AppBuilder::default()
+    }
+}
+
+/// Helper for constructing an App without requiring a GlobalConfig.
+#[derive(Default)]
+pub struct AppBuilder {
+    offices: Vec<config::OfficeEntry>,
+}
+
+impl AppBuilder {
+    pub fn build(self) -> App {
+        App {
+            current_office: None,
+            offices: self.offices,
+            command_palette_open: false,
+            should_exit: false,
+        }
+    }
 }
 
 /// The different "modes" of work available within an office.

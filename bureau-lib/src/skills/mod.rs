@@ -197,3 +197,59 @@ fn parse_frontmatter(frontmatter: &str) -> Result<()> {
     let _: serde_yaml::Value = serde_yaml::from_str(frontmatter).map_err(|e| anyhow!("Invalid YAML in SKILL.md frontmatter: {}", e))?;
     Ok(())
 }
+
+// ==========================================================================
+// P9: Unit tests for skills loading and stacking precedence
+// ==========================================================================
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    fn setup_test_dir() -> tempfile::TempDir {
+        tempfile::tempdir().expect("create temp dir")
+    }
+
+    #[test]
+    fn test_skill_name_fallback_to_directory_name() {
+        let dir = setup_test_dir();
+        let skill_dir = dir.path().join("my-skill");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        let mut f = std::fs::File::create(skill_dir.join("SKILL.md")).unwrap();
+        writeln!(f, "# My skill without frontmatter").unwrap();
+        
+        let skill = parse_skill_file(&skill_dir).unwrap();
+        assert_eq!(skill.name, "my-skill");
+    }
+
+    #[test]
+    fn test_skill_name_from_frontmatter() {
+        let dir = setup_test_dir();
+        let skill_dir = dir.path().join("actual-name");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        let mut f = std::fs::File::create(skill_dir.join("SKILL.md")).unwrap();
+        writeln!(f, "---").unwrap();
+        writeln!(f, "name: overriden-name").unwrap();
+        writeln!(f, "description: test desc").unwrap();
+        writeln!(f, "---").unwrap();
+        writeln!(f, "# Content").unwrap();
+
+        let skill = parse_skill_file(&skill_dir).unwrap();
+        assert_eq!(skill.name, "overriden-name");
+    }
+
+    #[test]
+    fn test_invalid_yaml_fails() {
+        let dir = setup_test_dir();
+        let skill_dir = dir.path().join("bad");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        let mut f = std::fs::File::create(skill_dir.join("SKILL.md")).unwrap();
+        writeln!(f, "---").unwrap();
+        writeln!(f, "name: broken").unwrap();
+        writeln!(f, "[invalid yaml{{{").unwrap(); // invalid YAML
+        writeln!(f, "---").unwrap();
+
+        let result = parse_skill_file(&skill_dir);
+        assert!(result.is_err());
+    }
+}

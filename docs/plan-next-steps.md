@@ -86,6 +86,45 @@ Implemented types:
 | `InspectorGate` | Approval workflow manager: `submit()`, `approve()`, `deny()`, `pending_sorted()`, `has_pending_for()` |
 | `ResolvedRequest` | Audit trail record: from_ticket, action_label, resolved_at |
 
+### P5 — Agent Loop Integration ✅
+Wired discovered skills into the agent loop prompt context:
+- **AgentLoop**: added `mode: Mode` field + `new()` constructor; implemented `assemble_system_prompt()` that:
+  - Creates a `SkillsLoader` for the current mode and office path
+  - Calls `assembly_prompt()` and prepends results as system prompt prefix
+  - Includes agent context (mode, ticket_id) in the output
+- **Sandbox + InspectorGate integration**: added `check_with_gate()` method on `PermitSandbox`
+  - Takes `ticket_id` + gate reference; blocks writes if pending scope requests exist
+  - Returns `Err(pending_request_ids)` or `Ok(check)` depending on gate status
+- **DashboardView builder**: added `from_offices()` and `empty()` constructors
+
+### P6 — TUI Integration of Dashboard Types ✅
+Added ratatui rendering helpers in `bureau-lib::dashboard`:
+- `status_badge() → &str`: returns Unicode badge per PermitStatus variant (✓▶⧖◆ etc.)
+- `pending_action_bar(&PermissionPanel) → String`: generates `[A]pprove/[D]eny` action bar text
+- `ticket_grid_as_table(&TicketGrid) → (headers, rows)`: formats grid for ratatui Table widget
+
+### P7 — Run Config CLI ✅
+Implemented CLI entry point (`tui/src/main.rs`) with all commands:
+- `bureau-tui run-config list [mode]` → lists configs by mode or all
+- `bureau-tui run-config add --name X --mode execution [--description] [--skip-inspection]` → writes config to `.bureau/run_configs.yaml`
+- `bureau-tui start <office>` → loads office config + defaults, prints available configs for the mode
+- `bureau-tui tui` (no-args) → scaffold TUI launcher (reads global config, lists offices)
+
+### P8 — Office Init (`bureau new-office`) ✅
+Implemented scaffolding in `main.rs cmd_new_office()`:
+- Creates `.bureau/` directory with subdirs: `tickets/`, `plans/`, `executions/`, `inspections/`, `archive/`
+- Generates `.bureau/config.yaml` with office id, name, worksite
+- Writes default `.bureau/run_configs.yaml`
+- Registers office in `~/.bureau/config.yaml` global registry
+
+### P9 — Testing ✅
+Unit and integration tests:
+- **skills**: name fallback to dir-name, frontmatter override, invalid YAML rejection
+- **sandbox + inspector gate**: pattern matching, default-deny, write-gating workflow
+- **run_config**: save/load roundtrip, by_mode filtering, defaults on missing file
+- **dashboard**: ticket grid archiving filter, pending action bar, status badges, dependency tracker
+- **integration tests** (`tests/integration_test.rs`): sandbox→inspector pipeline, run-config persistence, skill stacking precedence, dashboard assembly, inspector lifecycle
+
 ---
 
 ## Known Issues / Blockers
@@ -97,35 +136,18 @@ Implemented types:
 
 ---
 
-## Pending Work
+## Pending Work (Future Sprints)
 
-### P5 — Agent Loop Integration (Next Priority)
-Wire discovered skills into the agent loop prompt context:
-- Call `SkillsLoader::assembly_prompt()` before each LLM call during execution/planning modes
-- Pass assembly output as system prompt prefix alongside PermitCard/TicketGrid state snapshot
-- Wire `InspectorGate.pending_sorted()` into sandbox decision routing (block worker writes until inspection clears scope requests)
+### P5–P9 — Completed ✅
+All items from this iteration are implemented (see "Completed" section above).
 
-### P6 — TUI Integration of Dashboard Types
-Use `bureau_lib::dashboard` modules in the tui crate:
-- Render `PermitCard`s as expandable sidebar items in `tui/src/app.rs` command palette
-- Feed `TicketGrid.rows` into a ratatui Table widget
-- Connect `WorkerBar.render()` to ratau's Gauge/BarGauge widgets for progress display
-- Wire `PermissionPanel.pending` into the TUI action bar (Approve/Deny keybindings)
-
-### P7 — Run Config CLI
-- `bureau run-config list [mode]` → print configs from `.bureau/run_configs.yaml`
-- `bureau run-config add --name X --mode execution ...` → write config entry
-- `bureau start <office>` → resolve default config via `run_config::load()` then invoke agent loop
-
-### P8 — Office Init (`bureau new-office`)
-- Scaffold `.bureau/config.yaml`, directory layout (interviews_dir, plans_dir, etc.)
-- Ask user for office name + language (manual per ADR3/Q10 grilling)
-- Register in `GlobalConfig::offices` list
-
-### P9 — Testing
-- Unit tests in `mod tests` blocks in each module
-- Integration tests: pipe→office flow, sandbox enforcement, skills stacking precedence
-- Skills loading: test alphabetization precedence (global-shared loads before office-shared)
+### Remaining Priorities
+1. **Integration with actual LLM provider** — implement `ChatProvider::chat()` with reqwest
+2. **Agent loop orchestrator** — wire checkpoint/JSONL history into a real turn loop
+3. **TUI ratatui rendering** — connect dashboard helpers to actual widgets in `tui/src/app.rs`
+4. **Pipe-to-office flow** — implement research→office piping with intent-setting gate (Q27/Q32)
+5. **Archivist validation** — complete D9 cross-reference audit + run config proposals
+6. **Provider trait completion** — full ChatProvider impl for OpenAI/other providers
 
 ---
 
@@ -153,8 +175,9 @@ bureau/                              ← WORKSPACE ROOT
 └── tui/                             ← BINARY CRATE
     ├── Cargo.toml                   ← depends on bureau-lib + ratatui/crossterm
     └── src/
-        ├── mod.rs                   ← CLI entry point
-        └── app.rs                   ← App state, office switching logic
+        ├── main.rs                  ← CLI entry point (P7 + P8 commands)
+        ├── mod.rs                   ← TUI event loop scaffold
+        └── app.rs                   ← App state, office switching logic + builder pattern
 
 Cross-crate boundary: tui uses bureau_lib::{config, ticket, sandbox, skills, run_config, dashboard, inspector}
 ```

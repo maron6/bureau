@@ -341,3 +341,158 @@ impl Default for DashboardView {
         }
     }
 }
+
+// ==========================================================================
+// Dashboard builder — assembles View from office data (P5)
+// ==========================================================================
+
+impl DashboardView {
+    /// Assemble a dashboard view from an office's ticket set and permit chain.
+    pub fn from_offices(
+        permits: Vec<PermitCard>,
+        grid: TicketGrid,
+        worker_bars: Vec<WorkerBar>,
+        permissions: PermissionPanel,
+        dependencies: DependencyTracker,
+    ) -> Self {
+        Self { permits, grid, worker_bars, permissions, dependencies }
+    }
+
+    /// Build an empty dashboard suitable as a placeholder when no office is loaded.
+    pub fn empty() -> Self {
+        Self::default()
+    }
+}
+
+// ==========================================================================
+// P6: ratatui rendering methods for each dashboard component
+// ==========================================================================
+
+/// Status badge character for use in the TUI sidebar.
+pub fn status_badge(status: &PermitStatus) -> &'static str {
+    match status {
+        PermitStatus::Draft => "\u{00B7}",
+        PermitStatus::InReview => "\u{25CC}",
+        PermitStatus::Approved => "\u{2713}",
+        PermitStatus::InExecution => "\u{25B6}",
+        PermitStatus::ReadyForInspection => "\u{29DA}",
+        PermitStatus::Inspected => "\u{2717}",
+        PermitStatus::Archiving => "\u{25E7}",
+        PermitStatus::Archived => "\u{25C6}",
+    }
+}
+
+/// Render a compact summary line for display in the TUI action bar.
+pub fn pending_action_bar(permissions: &PermissionPanel) -> String {
+    if permissions.pending.is_empty() {  
+        "No pending permission requests".to_string()
+    } else {
+        format!(
+            "\u{26A0} {} pending | \u{2713} {} approved [A]pprove/[D]eny",
+            permissions.pending.len(),
+            permissions.approved.len()
+        )
+    }
+}
+
+/// Build a ratatui Table column layout for the ticket grid.
+/// Returns (headers, rows) where each row is an array of formatted cell strings.
+pub fn ticket_grid_as_table(grid: &TicketGrid) -> (Vec<String>, Vec<Vec<String>>) {
+    let headers = grid.columns.clone();
+    let mut rows = Vec::new();
+
+    for row in &grid.rows {
+        if !grid.show_archived || !row.status.contains("archived") {
+            rows.push(vec![
+                row.display_id.clone(),
+                row.type_label.clone(),
+                row.status.clone(),
+                format!("{} workers", row.active_workers),
+            ]);
+        }
+    }
+
+    (headers, rows)
+}
+
+
+
+// ==========================================================================
+// P9: Unit tests for dashboard components and rendering
+// ==========================================================================
+#[cfg(test)]
+mod tests {
+    use super::*;
+    
+    #[test]
+    fn test_ticket_grid_as_table_filters_archived() {
+        let grid = TicketGrid {
+            columns: vec!["ticket".into(), "type".into(), "status".into(), "workers".into()],
+            rows: vec![
+                TicketRow { display_id: "001".into(), type_label: "execution".into(), status: "in_progress".into(), active_workers: 2, progress: Some(50) },
+                TicketRow { display_id: "002".into(), type_label: "archival".into(), status: "archived_in_2024".into(), active_workers: 0, progress: None },
+            ],
+            show_archived: false,
+        };
+        let (headers, rows) = ticket_grid_as_table(&grid);
+        assert_eq!(headers.len(), 4);
+        assert_eq!(rows.len(), 1); // archived row filtered out
+    }
+
+    #[test]
+    fn test_pending_action_bar_empty() {
+        let panel = PermissionPanel::default();
+        let bar = pending_action_bar(&panel);
+        assert!(bar.contains("No pending"));
+    }
+
+    #[test]
+    fn test_pending_action_bar_has_pending() {
+        let panel = PermissionPanel {
+            approved: vec![PermissionEntry::default()],
+            pending: vec![
+                PermissionEntry {
+                    ticket_id: "t1".into(),
+                    path_pattern: "/new/**".into(),
+                    access_type: PermissionAccessType::Write,
+                    justification: "need access".into(),
+                    requested_at: chrono::Utc::now(),
+                },
+            ],
+        };
+        let bar = pending_action_bar(&panel);
+        assert!(bar.contains("1 pending"));
+        assert!(bar.contains("[A]pprove/[D]eny"));
+    }
+
+    #[test]
+    fn test_status_badge() {
+        assert_eq!(status_badge(&PermitStatus::Approved), "\u{2713}"); // checkmark
+        assert_eq!(status_badge(&PermitStatus::Draft), "\u{00B7}");   // middle dot
+        assert_eq!(status_badge(&PermitStatus::InExecution), "\u{25B6}"); // play
+    }
+
+    #[test]
+    fn test_dashboard_view_default() {
+        let view = DashboardView::default();
+        assert!(view.permits.is_empty());
+        assert!(view.worker_bars.is_empty());
+        
+        let empty = DashboardView::empty();
+        assert_eq!(empty.permits.len(), view.permits.len());
+    }
+
+    #[test]
+    fn test_dependency_tracker_unblocks() {
+        let mut tracker = DependencyTracker::default();
+        // B blocks A: "ticket A is blocked until ticket B reaches 'approved'"
+        tracker.add_dependency("B", "A", "approved");
+        
+        assert!(tracker.is_blocked("A"));
+        
+        // After B reaches 'approved', A should be unblocked
+        // (simulated by removing the dependency or checking manually)
+        let unblocked = tracker.unblockers_on_status("B", "approved");
+        assert_eq!(unblocked, vec!["A".to_string()]);
+    }
+}

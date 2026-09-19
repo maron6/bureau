@@ -165,3 +165,65 @@ impl RunConfigs {
         Ok(())
     }
 }
+
+// ==========================================================================
+// P9: Unit tests for run configuration module
+// ==========================================================================
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    #[test]
+    fn test_run_config_save_load_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = RunConfigs::default();
+        
+        // Add a run config.
+        let rc = RunConfig {
+            name: "test-config".to_string(),
+            run_mode: Mode::Execution,
+            description: Some("A test config".into()),
+            skip_inspection: true,
+            permit_filter: Some("p001".into()),
+            ..Default::default()
+        };
+        config.configs.push(rc);
+        
+        // Save and reload.
+        config.save(dir.path()).unwrap();
+        let loaded = load(dir.path()).unwrap();
+        
+        assert_eq!(loaded.configs.len(), 1);
+        assert_eq!(loaded.configs[0].name, "test-config");
+        assert_eq!(loaded.configs[0].run_mode, Mode::Execution);
+        assert_eq!(loaded.configs[0].skip_inspection, true);
+    }
+
+    #[test]
+    fn test_by_mode_filter() {
+        let configs = RunConfigs {
+            defaults: Defaults::default(),
+            configs: vec![
+                RunConfig { run_mode: Mode::Execution, ..Default::default() },
+                RunConfig { run_mode: Mode::Inspection, ..Default::default() },
+                RunConfig { run_mode: Mode::Execution, ..Default::default() },
+            ],
+        };
+        
+        let execution = configs.by_mode(Mode::Execution);
+        assert_eq!(execution.len(), 2);
+        
+        let inspection = configs.by_mode(Mode::Inspection);
+        assert_eq!(inspection.len(), 1);
+    }
+
+    #[test]
+    fn test_defaults_applied_when_file_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        // No run_configs.yaml file exists.
+        let loaded = load(dir.path()).unwrap();
+        assert_eq!(loaded.configs.len(), 0);
+        assert_eq!(loaded.defaults.default, Mode::Execution);
+    }
+}

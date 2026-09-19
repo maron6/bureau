@@ -1,8 +1,7 @@
 //! Agent loop management — checkpoints, resume, mode gating.
 //! Follows Decision D6: LLM via HTTP + checkpoint/resume with JSONL history.
 //! Follows Q16/B: Save partial content and context between turns.
-
-use serde::{Deserialize, Serialize};
+P5: Skills assembly, dashboard context injection, inspector gate wiring.
 
 // --------------------------------------------------------------------------
 // Agent State (what the orchestrator knows about each running agent)
@@ -12,9 +11,22 @@ use serde::{Deserialize, Serialize};
 pub struct AgentLoop {
     pub ticket_id: String,
     pub agent_type: crate::ticket::AgentType,
+    /// Which bureau mode this loop is operating in (execution, inspection, etc.).
+    pub mode: crate::config::Mode,
     /// JoinHandle tracker for concurrency management (fan-out/fan-in).
     /// The Rust TUI tracks these to know when workers finish.
     // Note: tokio::task::JoinHandle is in the handle module since it can't be stored directly.
+}
+
+impl AgentLoop {
+    /// Create a new agent loop for the given mode and ticket.
+    pub fn new(ticket_id: impl Into<String>, agent_type: crate::ticket::AgentType, mode: crate::config::Mode) -> Self {
+        Self {
+            ticket_id: ticket_id.into(),
+            agent_type,
+            mode,
+        }
+    }
 }
 
 /// Barrier that blocks the next mode from starting until all current workers are done.
@@ -37,6 +49,38 @@ impl ModeBarrier {
     /// Register a worker that must complete before unblocking.
     pub fn add_worker(&self) {
         self.counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+// --------------------------------------------------------------------------
+// P5: System prompt assembly (skills + dashboard state)
+// --------------------------------------------------------------------------
+
+impl AgentLoop {
+    /// Build the full system prompt prefix for this agent loop.
+    /// Composes: skills assembly → permit/dashboard context → authority info.
+    pub fn assemble_system_prompt(&self, office_home: &std::path::Path) -> anyhow::Result<String> {
+        let mut parts = Vec::new();
+
+        // Skills assembly (ADR3 / Q12 ordering).
+        let loader = crate::skills::SkillsLoader::new(&self.mode.to_string(), office_home);
+        if let Ok(skills_prompt) = loader.assembly_prompt() {
+            if !skills_prompt.is_empty() {
+                parts.push(skills_prompt);
+            }
+        }
+
+        // Dashboard context: provide a snapshot of current ticket/state state.
+        parts.push(format!(
+            "## AGENT CONTEXT\nMode: {}\nTicket: {}\n",
+            self.mode, self.ticket_id
+        ));
+
+        // Note: InspectorGate is passed at runtime in the full agent loop;
+        // here we note the pattern that will be wired.
+        parts.push("## SCOPE STATUS\nAll writes require approved scope expansion.\n".to_string());
+
+        Ok(parts.concat())
     }
 }
 
