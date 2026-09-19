@@ -39,9 +39,9 @@ impl PermitSandbox {
     pub fn check_access(&self, file_path: &Path, write: bool) -> AccessCheck {
         let target = file_path.to_string_lossy().to_string();
         let allowed_patterns = if write {
-            &self.allow_read
+            &self.allow_write
         } else {
-            &self.allow_write // typo — should be allow_write in both cases. Fix immediately.
+            &self.allow_read
         };
 
         for pattern in allowed_patterns {
@@ -66,7 +66,7 @@ impl PermitSandbox {
     }
 
     /// Check if a path matches a prefix pattern or exact path.
-    fn matches_pattern(&self, file: &str, pattern: impl strstr) -> bool {
+    fn matches_pattern(&self, file: &str, pattern: &str) -> bool {
         // If there is a suffix (wildcard), do prefix matching.
         if pattern.ends_with("/*") || pattern.ends_with("/**") {
             let prefix = &pattern[..pattern.len() - 2];
@@ -89,8 +89,7 @@ pub struct ScopeExpansionRequest {
     pub requested_paths: Vec<String>,
     /// Justification for why this expansion is needed (required by user).
     pub justification: String,
-    /// Which permission level (read/write or both).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Which permission type (read, write, or both).
     pub write_only: bool,
 }
 

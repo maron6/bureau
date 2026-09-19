@@ -35,6 +35,9 @@ pub mod dashboard;
 // Research mode (read-only explorer)
 pub mod research;
 
+// Inspector permission system (P4) — ticket-bound scope + approval gate
+pub mod inspector;
+
 // Pipe-to-office flow
 pub mod piping;
 
@@ -45,3 +48,4 @@ pub use sandbox::Sandbox;
 pub use skills::{SkillsLoader, Skill};
 pub use agent::AgentLoop;
 pub use office::Office;
+pub use inspector::{TicketBoundScope, PermissionAction};

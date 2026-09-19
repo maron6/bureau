@@ -46,7 +46,7 @@ impl Office {
             id: id.into(),
             name: name.into(),
             home,
-            worksite: config.workste.clone(),  // use office config's worksite path
+            worksite: config.worksite.clone(),
             config,
             status: OfficeStatus::default(),
         })

@@ -76,7 +76,9 @@ impl ResearchSession {
 }
 
 /// Generate a default name from random adjective + random noun for the session.   
-pub fn default_session_name() -> &'static str { "azure-windmill" // TODO: use real lists
+pub fn default_session_name() -> &'static str {
+    "azure-windmill" // TODO: use real adjective/noun lists
+}
 
 
 // ==========================================================================

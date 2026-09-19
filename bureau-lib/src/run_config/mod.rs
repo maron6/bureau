@@ -142,26 +142,26 @@ pub fn load(office_home: &Path) -> anyhow::Result<RunConfigs> {  // uses anyhow 
     }
         
     let content = std::fs::read_to_string(&path)?;   
-    serde_yaml::from_str(&content).map_err(|e| anyhow!("Failed to parse {}: {}", path.display(), e));
+    serde_yaml::from_str(&content).map_err(|e| anyhow!("Failed to parse {}: {}", path.display(), e))
 }
 
 impl RunConfigs {
-   /// Filter run configs in current list by provided mode value: return only ones matching specified enum variant. Helps with D20/Q40/B workflow type filtering per command palette options.   
-    pub fn by_mode(&self, mode: Mode) -> Vec<&RunConfig> {  // references not clones since we're iterating owned vec for quick selection purposes within the run_configs loader struct impl block here below in this file section just above right now ...  
+    /// Filter run configs by provided mode value. Returns only those matching the specified enum variant.
+    pub fn by_mode(&self, mode: Mode) -> Vec<&RunConfig> {
         self.configs.iter().filter(|c| c.run_mode == mode).collect()
     }
 
- /// Insert user-created config into configs list; caller decides persistence strategy (save directly to yaml via load+modify+save cycle or let higher-level code handle that part of state machine management separately outside this crate's scope for now until integration testing phase comes along during P1/P2 implementation sprint timeline).  pub fn save(&self, office_home: &Path) -> Result<(), anyhow::Error> {
-    let path = storage_path(office_home);
+    /// Insert user-created config into configs list; caller decides persistence strategy.
+    pub fn save(&self, office_home: &Path) -> Result<(), anyhow::Error> {
+        let path = storage_path(office_home);
+        let dir = path.parent().unwrap_or(Path::new("."));
+        std::fs::create_dir_all(dir)?;
 
-   let dir = path.parent().unwrap_or(Path::new("."));  // handle case where parent may not exist yet due to relative paths or edge cases with home directory detection logic above in helper fn load_office_config et al earlier in this same crate module scope block.   
-std::fs::create_dir_all(dir)?;
+        let content = serde_yaml::to_string(self)
+            .map_err(|e| anyhow!("Unable to serialize run configs: {e}"))?;
 
-let content = serde_yaml::to_string(self)
-    .map_err(|e| anyhow!("Unable to write out contents back into file {}: {}", path.display(), e))?
-        
-     std::fs::write(&path, content)
-            .map_err(|e| anyhow!("Failed to save {} (io): {}", path.display(), e))?;
+        std::fs::write(&path, content)
+            .map_err(|e| anyhow!("Failed to save {} (io): {e}", path.display()))?;
         Ok(())
     }
 }

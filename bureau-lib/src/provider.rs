@@ -55,7 +55,11 @@ pub struct MessageUsage {
 pub enum ChatChunk {
     Text(String),
     /// Tool call the LLM wants to make (file read / file write / process exec).
-        // Note: tokio::sync::Stream is not used here yet. This is scaffolding only — implement proper streaming later.
+    Tool {
+        name: String,
+        args: serde_json::Value,
+    },
+}
 
 /// A tool call that the agent loop intercepts and validates before executing.
 /// Follows decision D7 + sandbox enforcement: Rust controls every write.  
